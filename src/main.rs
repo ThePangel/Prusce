@@ -1,35 +1,47 @@
 use clap::Parser;
-use std::io::prelude::*;
-use std::net::TcpListener;
-use std::net::TcpStream;
-use std::thread;
-use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::time::{Duration, sleep};
 
 #[derive(Parser, Clone)]
 struct Cli {
-    ip: String,
+    peer_ip: String,
 
-    port: String,
+    peer_port: String,
+
+    local_port: String,
 }
-fn handle_client(mut stream: TcpStream) -> std::io::Result<()> {
-    let mut buffer = [0; 1024];
-    let bytes_read = stream.read(&mut buffer)?;
+async fn handle_client(mut stream: TcpStream) -> std::io::Result<()> {
+    loop {
+        let mut buffer = [0; 1024];
+        let bytes_read = match stream.read(&mut buffer).await {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                println!("Connection lost: {}. Reconnecting...", e);
+                break;
+            }
+        };
 
-    println!("Server received: {:?}", &buffer[..bytes_read]);
+        if bytes_read == 0 {
+            println!("Client disconnected gracefully");
+            break;
+        }
 
-    // Echo back the data
-    stream.write(&buffer[..bytes_read])?;
+        let received_data = String::from_utf8_lossy(&buffer[..bytes_read]);
+        println!("{}", received_data);
+    }
     Ok(())
 }
-fn main() -> std::io::Result<()> {
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
     let args = Cli::parse();
-    //let server_port = args.port.clone();
-    let client_ip = args.ip.clone();
-    let client_port = args.port.clone();
-
+    let peer_ip = args.peer_ip.clone();
+    let client_port = args.local_port.clone();
+    let peer_port = args.peer_port.clone();
     drop(args);
-    thread::spawn(move || {
-        let listener = match TcpListener::bind(format!("127.0.0.1:3345")) {
+
+    let server_task = tokio::spawn(async move {
+        let listener = match TcpListener::bind(format!("127.0.0.1:{}", client_port)).await {
             Ok(listener) => listener,
             Err(e) => {
                 eprintln!("Failed to bind to port: {}", e);
@@ -37,10 +49,10 @@ fn main() -> std::io::Result<()> {
             }
         };
 
-        for stream in listener.incoming() {
-            match stream {
-                Ok(stream) => {
-                    if let Err(e) = handle_client(stream) {
+        loop {
+            match listener.accept().await {
+                Ok((stream, _addr)) => {
+                    if let Err(e) = handle_client(stream).await {
                         eprintln!("Error handling client: {}", e);
                     }
                 }
@@ -50,20 +62,48 @@ fn main() -> std::io::Result<()> {
             }
         }
     });
-    thread::spawn(move || {
+
+    let client_task = tokio::spawn(async move {
+        let stdin = tokio::io::stdin();
+        let mut reader = tokio::io::BufReader::new(stdin);
         loop {
-            let mut stream = match TcpStream::connect(format!("{}:{}", &client_ip, &client_port)) {
-                Ok(stream) => stream,
-                Err(e) => {
-                    eprint!("Error: {}", e);
-                    continue; 
+            let mut stream = loop {
+                match TcpStream::connect(format!("{}:{}", &peer_ip, &peer_port)).await {
+                    Ok(stream) => {
+                        println!("Connected successfully!");
+                        break stream;
+                    }
+                    Err(e) => {
+                        eprint!("Connection failed: {}. \n Retrying...", e);
+                        sleep(Duration::from_secs(1)).await;
+                        continue;
+                    }
                 }
             };
-            let _ = stream.write(&[1]);
-            
+
+            loop {
+                let mut buffer = String::new();
+                match reader.read_line(&mut buffer).await {
+                    Ok(0) => return,
+                    Ok(_) => {
+                        if let Err(e) = stream.write_all(buffer.as_bytes()).await {
+                            println!("Write error: {}", e);
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        println!("Input error: {}", e);
+                        break;
+                    }
+                }
+            }
         }
-        
     });
-    loop{thread::sleep(Duration::from_millis(1))};
-   
+
+    tokio::select! {
+        _ = server_task => {},
+        _ = client_task => {},
+    }
+
+    Ok(())
 }
