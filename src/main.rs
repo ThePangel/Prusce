@@ -1,8 +1,8 @@
 use clap::Parser;
+use std::io::{self, Write};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{Duration, sleep};
-use std::io::{self, Write};
 
 #[derive(Parser, Clone)]
 struct Cli {
@@ -13,6 +13,7 @@ struct Cli {
     local_port: String,
 }
 async fn handle_client(mut stream: TcpStream) -> std::io::Result<()> {
+    eprintln!("Connected!");
     loop {
         let mut buffer = [0; 1024];
         let bytes_read = match stream.read(&mut buffer).await {
@@ -78,7 +79,6 @@ async fn main() -> std::io::Result<()> {
             let mut stream = loop {
                 match TcpStream::connect(format!("{}:{}", &peer_ip, &peer_port)).await {
                     Ok(stream) => {
-                        eprintln!("Connected successfully!");
                         break stream;
                     }
                     Err(e) => {
@@ -96,23 +96,21 @@ async fn main() -> std::io::Result<()> {
                     }
                 }
             };
-
-           
+            let _ = stream.write_all(&[0]).await;
+            loop {
                 let mut buffer = String::new();
                 match reader.read_line(&mut buffer).await {
                     Ok(0) => return,
                     Ok(_) => {
-                        if let Err(e) = stream.write_all(buffer.as_bytes()).await {
-                            eprintln!("Write error: {}", e);
+                        if let Err(_e) = stream.write_all(buffer.as_bytes()).await {
                             break;
                         }
                     }
-                    Err(e) => {
-                        eprintln!("Input error: {}", e);
+                    Err(_e) => {
                         break;
                     }
                 }
-            
+            }
         }
     });
 
