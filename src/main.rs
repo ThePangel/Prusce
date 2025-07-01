@@ -2,6 +2,7 @@ use clap::Parser;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{Duration, sleep};
+use std::io::{self, Write};
 
 #[derive(Parser, Clone)]
 struct Cli {
@@ -17,18 +18,21 @@ async fn handle_client(mut stream: TcpStream) -> std::io::Result<()> {
         let bytes_read = match stream.read(&mut buffer).await {
             Ok(bytes) => bytes,
             Err(e) => {
-                println!("Connection lost: {}. Reconnecting...", e);
+                print!("Connection lost: {}. Reconnecting...\n", e);
+                io::stdout().flush().unwrap();
                 break;
             }
         };
 
         if bytes_read == 0 {
-            println!("Client disconnected gracefully");
+            print!("Client disconnected gracefully\n");
+            io::stdout().flush().unwrap();
             break;
         }
 
         let received_data = String::from_utf8_lossy(&buffer[..bytes_read]);
-        println!("{}", received_data);
+        print!("{}", received_data);
+        io::stdout().flush().unwrap();
     }
     Ok(())
 }
@@ -44,6 +48,10 @@ async fn main() -> std::io::Result<()> {
         let listener = match TcpListener::bind(format!("127.0.0.1:{}", client_port)).await {
             Ok(listener) => listener,
             Err(e) => {
+                if e.to_string() == "invalid port value" {
+                    eprintln!("Failed to bind to port: Invalid local port value");
+                    return;
+                }
                 eprintln!("Failed to bind to port: {}", e);
                 return;
             }
@@ -70,33 +78,41 @@ async fn main() -> std::io::Result<()> {
             let mut stream = loop {
                 match TcpStream::connect(format!("{}:{}", &peer_ip, &peer_port)).await {
                     Ok(stream) => {
-                        println!("Connected successfully!");
+                        eprintln!("Connected successfully!");
                         break stream;
                     }
                     Err(e) => {
-                        eprint!("Connection failed: {}. \n Retrying...", e);
+                        if e.to_string() == "invalid port value" {
+                            eprintln!("Connection failed: Invalid peer port value.");
+                            return;
+                        } else if e.to_string() == "No such host is known. (os error 11001)" {
+                            eprintln!("Connection failed: {}. \nProbably wrong ip adress", e);
+
+                            return;
+                        }
+                        eprintln!("Retrying... ");
                         sleep(Duration::from_secs(1)).await;
                         continue;
                     }
                 }
             };
 
-            loop {
+           
                 let mut buffer = String::new();
                 match reader.read_line(&mut buffer).await {
                     Ok(0) => return,
                     Ok(_) => {
                         if let Err(e) = stream.write_all(buffer.as_bytes()).await {
-                            println!("Write error: {}", e);
+                            eprintln!("Write error: {}", e);
                             break;
                         }
                     }
                     Err(e) => {
-                        println!("Input error: {}", e);
+                        eprintln!("Input error: {}", e);
                         break;
                     }
                 }
-            }
+            
         }
     });
 
