@@ -1,2 +1,2 @@
 # Prusce
-P2P encypted cli chat program built with rust 
+P2P encrypted cli chat program built with rust 
