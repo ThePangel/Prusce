@@ -1,4 +1,5 @@
 use clap::Parser;
+use local_ip_address::local_ip;
 use std::io::{self, Write};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -7,11 +8,12 @@ use tokio::time::{Duration, sleep};
 #[derive(Parser, Clone)]
 struct Cli {
     peer_ip: String,
-
     peer_port: String,
-
     local_port: String,
+    #[arg(long, short)]
+    username: Option<String>,
 }
+
 async fn handle_client(mut stream: TcpStream) -> std::io::Result<()> {
     eprintln!("Connected!");
     loop {
@@ -37,9 +39,20 @@ async fn handle_client(mut stream: TcpStream) -> std::io::Result<()> {
     }
     Ok(())
 }
+
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    let args = Cli::parse();
+    let mut args = Cli::parse();
+    let client_local_ip = local_ip().unwrap();
+    if args.username.is_none() {
+        args.username = Some(client_local_ip.to_string());
+    }
+
+    let username = format!(
+        "{}@{}:~$ ",
+        args.username.as_ref().unwrap(),
+        client_local_ip.to_string()
+    );
     let peer_ip = args.peer_ip.clone();
     let client_port = args.local_port.clone();
     let peer_port = args.peer_port.clone();
@@ -75,6 +88,7 @@ async fn main() -> std::io::Result<()> {
     let client_task = tokio::spawn(async move {
         let stdin = tokio::io::stdin();
         let mut reader = tokio::io::BufReader::new(stdin);
+        print!("{}", username);
         loop {
             let mut stream = loop {
                 match TcpStream::connect(format!("{}:{}", &peer_ip, &peer_port)).await {
@@ -86,8 +100,7 @@ async fn main() -> std::io::Result<()> {
                             eprintln!("Connection failed: Invalid peer port value.");
                             return;
                         } else if e.to_string() == "No such host is known. (os error 11001)" {
-                            eprintln!("Connection failed: {}. \nProbably wrong ip adress", e);
-
+                            eprintln!("Connection failed: {}. \nProbably wrong ip address", e);
                             return;
                         }
                         eprintln!("Retrying... ");
@@ -96,13 +109,14 @@ async fn main() -> std::io::Result<()> {
                     }
                 }
             };
-            let _ = stream.write_all(&[0]).await;
+
             loop {
                 let mut buffer = String::new();
                 match reader.read_line(&mut buffer).await {
                     Ok(0) => return,
                     Ok(_) => {
-                        if let Err(_e) = stream.write_all(buffer.as_bytes()).await {
+                        let message_to_send = format!("{}{}", username, buffer);
+                        if stream.write_all(message_to_send.as_bytes()).await.is_err() {
                             break;
                         }
                     }
