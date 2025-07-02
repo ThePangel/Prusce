@@ -14,8 +14,10 @@ struct Cli {
     username: Option<String>,
 }
 
-async fn handle_client(mut stream: TcpStream) -> std::io::Result<()> {
-    eprintln!("Connected!");
+async fn handle_client(mut stream: TcpStream, username: String) -> std::io::Result<()> {
+    eprintln!("has connected!");
+    print!("{}", username);
+    io::stdout().flush().unwrap();
     loop {
         let mut buffer = [0; 1024];
         let bytes_read = match stream.read(&mut buffer).await {
@@ -34,7 +36,8 @@ async fn handle_client(mut stream: TcpStream) -> std::io::Result<()> {
         }
 
         let received_data = String::from_utf8_lossy(&buffer[..bytes_read]);
-        print!("{}", received_data);
+        print!("\r{}", received_data);
+        print!("{}", username);
         io::stdout().flush().unwrap();
     }
     Ok(())
@@ -56,6 +59,7 @@ async fn main() -> std::io::Result<()> {
     let peer_ip = args.peer_ip.clone();
     let client_port = args.local_port.clone();
     let peer_port = args.peer_port.clone();
+    let handle_username = username.clone();
     drop(args);
 
     let server_task = tokio::spawn(async move {
@@ -74,7 +78,7 @@ async fn main() -> std::io::Result<()> {
         loop {
             match listener.accept().await {
                 Ok((stream, _addr)) => {
-                    if let Err(e) = handle_client(stream).await {
+                    if let Err(e) = handle_client(stream, handle_username.clone()).await {
                         eprintln!("Error handling client: {}", e);
                     }
                 }
@@ -89,6 +93,8 @@ async fn main() -> std::io::Result<()> {
         let stdin = tokio::io::stdin();
         let mut reader = tokio::io::BufReader::new(stdin);
         print!("{}", username);
+        io::stdout().flush().unwrap();
+
         loop {
             let mut stream = loop {
                 match TcpStream::connect(format!("{}:{}", &peer_ip, &peer_port)).await {
@@ -115,6 +121,8 @@ async fn main() -> std::io::Result<()> {
                 match reader.read_line(&mut buffer).await {
                     Ok(0) => return,
                     Ok(_) => {
+                        print!("{}", username);
+                        io::stdout().flush().unwrap();
                         let message_to_send = format!("{}{}", username, buffer);
                         if stream.write_all(message_to_send.as_bytes()).await.is_err() {
                             break;
