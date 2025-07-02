@@ -1,5 +1,7 @@
 use clap::Parser;
+use colored::Colorize;
 use local_ip_address::local_ip;
+use rand::prelude::*;
 use std::io::{self, Write};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -14,9 +16,14 @@ struct Cli {
     username: Option<String>,
 }
 
-async fn handle_client(mut stream: TcpStream, username: String) -> std::io::Result<()> {
+async fn handle_client(
+    mut stream: TcpStream,
+    username: String,
+    peer_colors: [u8; 3],
+    client_colors: [u8; 3],
+) -> std::io::Result<()> {
     eprintln!("has connected!");
-    print!("{}", username);
+    print!("{}", username.truecolor(client_colors[0], client_colors[1], client_colors[2]));
     io::stdout().flush().unwrap();
     loop {
         let mut buffer = [0; 1024];
@@ -36,8 +43,17 @@ async fn handle_client(mut stream: TcpStream, username: String) -> std::io::Resu
         }
 
         let received_data = String::from_utf8_lossy(&buffer[..bytes_read]);
-        print!("\r{}", received_data);
-        print!("{}", username);
+        let printed_data: Vec<&str> = received_data.split_inclusive('$' ).collect();
+        print!(
+            "\r{}{}",
+            printed_data[0].truecolor(peer_colors[0], peer_colors[1], peer_colors[2]),
+            printed_data[1]
+        );
+        print!(
+            "{}",
+            username.truecolor(client_colors[0], client_colors[1], client_colors[2])
+        );
+
         io::stdout().flush().unwrap();
     }
     Ok(())
@@ -60,6 +76,17 @@ async fn main() -> std::io::Result<()> {
     let client_port = args.local_port.clone();
     let peer_port = args.peer_port.clone();
     let handle_username = username.clone();
+    let client_colors: [u8; 3] = [
+        255, 
+        rand::rng().random_range(0..125),   
+        rand::rng().random_range(0..125),   
+    ];
+    let peer_colors: [u8; 3] = [
+        rand::rng().random_range(0..125),   
+        rand::rng().random_range(0..125),   
+        255, 
+    ];
+    let client_ser_colors = client_colors.clone();
     drop(args);
 
     let server_task = tokio::spawn(async move {
@@ -78,7 +105,14 @@ async fn main() -> std::io::Result<()> {
         loop {
             match listener.accept().await {
                 Ok((stream, _addr)) => {
-                    if let Err(e) = handle_client(stream, handle_username.clone()).await {
+                    if let Err(e) = handle_client(
+                        stream,
+                        handle_username.clone(),
+                        peer_colors.clone(),
+                        client_ser_colors.clone(),
+                    )
+                    .await
+                    {
                         eprintln!("Error handling client: {}", e);
                     }
                 }
@@ -92,7 +126,10 @@ async fn main() -> std::io::Result<()> {
     let client_task = tokio::spawn(async move {
         let stdin = tokio::io::stdin();
         let mut reader = tokio::io::BufReader::new(stdin);
-        print!("{}", username);
+        print!(
+            "{}",
+            username.truecolor(client_colors[0], client_colors[1], client_colors[2])
+        );
         io::stdout().flush().unwrap();
 
         loop {
@@ -121,7 +158,14 @@ async fn main() -> std::io::Result<()> {
                 match reader.read_line(&mut buffer).await {
                     Ok(0) => return,
                     Ok(_) => {
-                        print!("{}", username);
+                        print!(
+                            "{}",
+                            username.truecolor(
+                                client_colors[0],
+                                client_colors[1],
+                                client_colors[2]
+                            )
+                        );
                         io::stdout().flush().unwrap();
                         let message_to_send = format!("{}{}", username, buffer);
                         if stream.write_all(message_to_send.as_bytes()).await.is_err() {
