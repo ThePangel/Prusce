@@ -72,7 +72,7 @@ async fn handle_client(
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let mut args = Cli::parse();
-    let client_local_ip = local_ip().unwrap();
+    let client_local_ip = local_ip().unwrap_or("127.0.0.1".parse().unwrap());
     if args.username.is_none() {
         args.username = Some(client_local_ip.to_string());
     }
