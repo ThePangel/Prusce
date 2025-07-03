@@ -1,12 +1,16 @@
 use clap::Parser;
 use colored::Colorize;
+use crossterm::cursor::position;
+use crossterm::event::{Event, KeyCode, KeyEvent, poll, read};
+use crossterm::{ExecutableCommand, cursor};
 use local_ip_address::local_ip;
 use rand::prelude::*;
-use std::io::{self, Write};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+use std::io::{self, Write, stdout};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{Duration, sleep};
-
 #[derive(Parser, Clone)]
 struct Cli {
     peer_ip: String,
@@ -21,9 +25,13 @@ async fn handle_client(
     username: String,
     peer_colors: [u8; 3],
     client_colors: [u8; 3],
+    last_sent: Arc<AtomicBool>,
 ) -> std::io::Result<()> {
     eprintln!("has connected!");
-    print!("{}", username.truecolor(client_colors[0], client_colors[1], client_colors[2]));
+    print!(
+        "{}",
+        username.truecolor(client_colors[0], client_colors[1], client_colors[2])
+    );
     io::stdout().flush().unwrap();
     loop {
         let mut buffer = [0; 1024];
@@ -43,18 +51,20 @@ async fn handle_client(
         }
 
         let received_data = String::from_utf8_lossy(&buffer[..bytes_read]);
-        let printed_data: Vec<&str> = received_data.split_inclusive('$' ).collect();
+
+        let printed_data: Vec<&str> = received_data.split_inclusive('$').collect();
         print!(
-            "\r{}{}",
+            "\r\x1b[2K{}{}",
             printed_data[0].truecolor(peer_colors[0], peer_colors[1], peer_colors[2]),
             printed_data[1]
         );
         print!(
-            "{}",
+            "\n{}",
             username.truecolor(client_colors[0], client_colors[1], client_colors[2])
         );
 
         io::stdout().flush().unwrap();
+        last_sent.store(true, Ordering::Relaxed);
     }
     Ok(())
 }
@@ -77,16 +87,21 @@ async fn main() -> std::io::Result<()> {
     let peer_port = args.peer_port.clone();
     let handle_username = username.clone();
     let client_colors: [u8; 3] = [
-        255, 
-        rand::rng().random_range(0..125),   
-        rand::rng().random_range(0..125),   
+        255,
+        rand::rng().random_range(0..125),
+        rand::rng().random_range(0..125),
     ];
     let peer_colors: [u8; 3] = [
-        rand::rng().random_range(0..125),   
-        rand::rng().random_range(0..125),   
-        255, 
+        rand::rng().random_range(0..125),
+        rand::rng().random_range(0..125),
+        255,
     ];
     let client_ser_colors = client_colors.clone();
+
+    let last_sent = Arc::new(AtomicBool::new(false));
+    let last_sent_server = last_sent.clone();
+    let last_sent_client = last_sent.clone();
+
     drop(args);
 
     let server_task = tokio::spawn(async move {
@@ -94,10 +109,11 @@ async fn main() -> std::io::Result<()> {
             Ok(listener) => listener,
             Err(e) => {
                 if e.to_string() == "invalid port value" {
-                    eprintln!("Failed to bind to port: Invalid local port value");
+                    println!("Failed to bind to port: Invalid local port value");
                     return;
                 }
-                eprintln!("Failed to bind to port: {}", e);
+                println!("Failed to bind to port: {}", e);
+                io::stdout().flush().unwrap();
                 return;
             }
         };
@@ -105,27 +121,34 @@ async fn main() -> std::io::Result<()> {
         loop {
             match listener.accept().await {
                 Ok((stream, _addr)) => {
-                    if let Err(e) = handle_client(
+                    match handle_client(
                         stream,
                         handle_username.clone(),
                         peer_colors.clone(),
                         client_ser_colors.clone(),
+                        last_sent_server.clone(),
                     )
                     .await
                     {
-                        eprintln!("Error handling client: {}", e);
+                        Ok(_) => {}
+                        Err(e) => {
+                            println!("Error handling client: {}", e);
+                            io::stdout().flush().unwrap();
+                        }
                     }
                 }
                 Err(e) => {
                     eprintln!("Error accepting connection: {}", e);
+                    io::stdout().flush().unwrap();
                 }
             }
         }
     });
 
     let client_task = tokio::spawn(async move {
-        let stdin = tokio::io::stdin();
-        let mut reader = tokio::io::BufReader::new(stdin);
+        let mut stdout = stdout();
+
+        let _ = stdout.execute(cursor::SetCursorStyle::BlinkingBlock);
         print!(
             "{}",
             username.truecolor(client_colors[0], client_colors[1], client_colors[2])
@@ -145,6 +168,8 @@ async fn main() -> std::io::Result<()> {
                         } else if e.to_string() == "No such host is known. (os error 11001)" {
                             eprintln!("Connection failed: {}. \nProbably wrong ip address", e);
                             return;
+                        } else {
+                            eprint!("{}", e)
                         }
                         eprintln!("Retrying... ");
                         sleep(Duration::from_secs(1)).await;
@@ -152,29 +177,77 @@ async fn main() -> std::io::Result<()> {
                     }
                 }
             };
+            let mut buffer = String::new();
 
             loop {
-                let mut buffer = String::new();
-                match reader.read_line(&mut buffer).await {
-                    Ok(0) => return,
-                    Ok(_) => {
-                        print!(
-                            "{}",
-                            username.truecolor(
-                                client_colors[0],
-                                client_colors[1],
-                                client_colors[2]
-                            )
-                        );
-                        io::stdout().flush().unwrap();
-                        let message_to_send = format!("{}{}", username, buffer);
-                        if stream.write_all(message_to_send.as_bytes()).await.is_err() {
-                            break;
-                        }
+                if last_sent_client.load(Ordering::Relaxed) {
+                    print!("{}", buffer);
+                    io::stdout().flush().unwrap();
+                    last_sent_client.store(false, Ordering::Relaxed);
+                };
+                if poll(Duration::from_millis(0)).unwrap_or(false) {
+                    match read().unwrap() {
+                        Event::Key(KeyEvent {
+                            code,
+                            kind: crossterm::event::KeyEventKind::Press,
+                            ..
+                        }) => match code {
+                            KeyCode::Char(c) => {
+                                buffer.push(c);
+                                print!("{}", c);
+                                io::stdout().flush().unwrap();
+                            }
+                            KeyCode::Backspace => match position() {
+                                Ok(value) => {
+                                    if value.0 >= (username.len() + 1) as u16 {
+                                        buffer.pop();
+                                        print!("\x08 \x08");
+                                        io::stdout().flush().unwrap();
+                                    }
+                                }
+                                Err(e) => {
+                                    eprint!("{}", e);
+                                }
+                            },
+                            KeyCode::Enter => {
+                                if !buffer.is_empty() {
+                                    println!(
+                                        "\n{}",
+                                        username.truecolor(
+                                            client_colors[0],
+                                            client_colors[1],
+                                            client_colors[2]
+                                        )
+                                    );
+
+                                    io::stdout().flush().unwrap();
+                                    stdout.execute(cursor::MoveUp(1)).unwrap();
+                                    stdout
+                                        .execute(cursor::MoveRight(username.len() as u16))
+                                        .unwrap();
+                                    let message_to_send = format!("{}{}", username, buffer);
+
+                                    match stream.write_all(message_to_send.as_bytes()).await {
+                                        Err(e) => {
+                                            eprint!("\r{}", e);
+                                        }
+                                        _ => {}
+                                    };
+
+                                    buffer = String::new();
+                                }
+                            }
+
+                            KeyCode::Esc => {
+                                return;
+                            }
+                            _ => {}
+                        },
+
+                        _ => {}
                     }
-                    Err(_e) => {
-                        break;
-                    }
+                } else {
+                    tokio::task::yield_now().await;
                 }
             }
         }
