@@ -112,7 +112,7 @@ async fn main() -> std::io::Result<()> {
                     eprintln!("Failed to bind to port: Invalid local port value");
                     return;
                 }
-                eachprintln!("Failed to bind to port: {}", e);
+                eprintln!("Failed to bind to port: {}", e);
              
                 return;
             }
@@ -139,7 +139,7 @@ async fn main() -> std::io::Result<()> {
                 }
                 Err(e) => {
                     eprintln!("Error accepting connection: {}", e);
-                    
+                    io::stdout().flush().unwrap();
                 }
             }
         }
