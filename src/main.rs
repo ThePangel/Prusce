@@ -38,15 +38,15 @@ async fn handle_client(
         let bytes_read = match stream.read(&mut buffer).await {
             Ok(bytes) => bytes,
             Err(e) => {
-                print!("Connection lost: {}. Reconnecting...\n", e);
-                io::stdout().flush().unwrap();
+                eprint!("Connection lost: {}. Reconnecting...\n", e);
+               
                 break;
             }
         };
 
         if bytes_read == 0 {
-            print!("Client disconnected gracefully\n");
-            io::stdout().flush().unwrap();
+            eprint!("Client disconnected gracefully\n");
+            
             break;
         }
 
@@ -109,11 +109,11 @@ async fn main() -> std::io::Result<()> {
             Ok(listener) => listener,
             Err(e) => {
                 if e.to_string() == "invalid port value" {
-                    println!("Failed to bind to port: Invalid local port value");
+                    eprintln!("Failed to bind to port: Invalid local port value");
                     return;
                 }
-                println!("Failed to bind to port: {}", e);
-                io::stdout().flush().unwrap();
+                eachprintln!("Failed to bind to port: {}", e);
+             
                 return;
             }
         };
@@ -132,14 +132,14 @@ async fn main() -> std::io::Result<()> {
                     {
                         Ok(_) => {}
                         Err(e) => {
-                            println!("Error handling client: {}", e);
-                            io::stdout().flush().unwrap();
+                            eprintln!("Error handling client: {}", e);
+                            
                         }
                     }
                 }
                 Err(e) => {
                     eprintln!("Error accepting connection: {}", e);
-                    io::stdout().flush().unwrap();
+                    
                 }
             }
         }
