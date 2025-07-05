@@ -1,23 +1,23 @@
 use aes_gcm::{
-    aead::{Aead, AeadCore, KeyInit, OsRng},
     Aes256Gcm, Key,
+    aead::{Aead, AeadCore, KeyInit, OsRng},
 };
 use colored::Colorize;
 use crossterm::{
-    cursor::{self, position},
-    event::{poll, read, Event, KeyCode, KeyEvent},
     ExecutableCommand,
+    cursor::{self, position},
+    event::{Event, KeyCode, KeyEvent, poll, read},
 };
 use sha2::{Digest, Sha256};
-use std::io::{self, stdout, Write};
+use std::io::{self, Write, stdout};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
-    time::{sleep, Duration},
+    time::{Duration, sleep},
 };
 
 pub async fn run_client_task(
@@ -100,8 +100,11 @@ pub async fn run_client_task(
                     }) => match code {
                         KeyCode::Char(c) => {
                             buffer.push(c);
-                            print!("{}", c);
-                            io::stdout().flush().unwrap();
+                            #[cfg(windows)]
+                            {
+                                print!("{}", c);
+                                io::stdout().flush().unwrap();
+                            }
                         }
                         KeyCode::Backspace => match position() {
                             Ok(value) => {
@@ -117,8 +120,13 @@ pub async fn run_client_task(
                         },
                         KeyCode::Enter => {
                             if !buffer.is_empty() {
+                                #[cfg(windows)]
+                                {
+                                    print!("\n");
+                                    io::stdout().flush().unwrap();
+                                }
                                 println!(
-                                    "\n{}",
+                                    "{}",
                                     username.truecolor(
                                         client_colors[0],
                                         client_colors[1],
@@ -139,14 +147,12 @@ pub async fn run_client_task(
                                         .encrypt(&nonce, message_to_send.as_bytes().as_ref())
                                     {
                                         Ok(encrypted_data) => {
-                                            if stream.write_all(nonce.as_slice()).await.is_err()
-                                            {
+                                            if stream.write_all(nonce.as_slice()).await.is_err() {
                                                 eprint!("\rConnection lost. Reconnecting...");
                                                 break;
                                             }
 
-                                            if stream.write_all(&encrypted_data).await.is_err()
-                                            {
+                                            if stream.write_all(&encrypted_data).await.is_err() {
                                                 eprint!("\rConnection lost. Reconnecting...");
                                                 break;
                                             };
@@ -156,10 +162,7 @@ pub async fn run_client_task(
                                         }
                                     }
                                 } else {
-                                    if stream
-                                        .write_all(&message_to_send.as_bytes())
-                                        .await
-                                        .is_err()
+                                    if stream.write_all(&message_to_send.as_bytes()).await.is_err()
                                     {
                                         eprint!("\rConnection lost. Reconnecting...");
                                         break;

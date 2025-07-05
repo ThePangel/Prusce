@@ -137,7 +137,7 @@ pub async fn run_server_task(
     is_encrypted: bool,
     password: String,
 ) {
-    let listener = match TcpListener::bind(format!("127.0.0.1:{}", client_port)).await {
+    let listener = match TcpListener::bind(format!("0.0.0.0:{}", client_port)).await {
         Ok(listener) => listener,
         Err(e) => {
             if e.to_string() == "invalid port value" {
