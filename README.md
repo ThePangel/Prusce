@@ -15,7 +15,7 @@ A simple, secure, and colorful peer-to-peer chat application built with Rust. It
 ## 🛠️ Installation
 
 ```bash
-git clone https://github.com/yourusername/prusce.git
+git clone https://github.com/thepangel/prusce.git
 cd prusce
 cargo install --path .
 ```
